@@ -31,18 +31,30 @@ then open **Compare offers**. This is the verified zero-key demo path.
 
 ## Inputs and sample mode
 
-Anchor Lines accepts a single PNG, JPG, or PDF award letter up to 4 MB (4 MiB
-at the byte boundary). The three checked-in sample letters are synthetic-only
-and intentionally vary their
-financial-aid terminology; they never call the model provider. They make it
-possible to demonstrate sample → analysis → comparison without uploading a
+Anchor Lines accepts a single plain-text (`.txt`) award letter up to 32 KB
+(32 KiB at the byte boundary).
+
+Plain text is the only accepted format, and that is a deliberate limit rather
+than an unfinished one. Every claim in the output is anchored to an exact line
+of the letter, so the tool is only honest if the text it anchors to is the text
+the student actually has. An image would need OCR, and a PDF rebuilds word
+spacing from glyph kerning and reading order from page geometry — neither is
+exact, and both fail hardest on the dollar-bearing tables that matter most. If
+your letter is a PDF or a scan, copy its text into a `.txt` file and check the
+figures before uploading, so the transcription is one you have verified rather
+than one a model guessed at.
+
+The three checked-in sample letters are synthetic-only and intentionally vary
+their financial-aid terminology; they never call the model provider. They make
+it possible to demonstrate sample → analysis → comparison without uploading a
 real letter or configuring a secret.
 
 For a live letter, the browser sends the selected file to the server route,
-which sends it to Anthropic for processing. The server validates MIME type,
-leading file-signature bytes, and size before any paid model call. Anchor Lines
-processes the file bytes in memory and does not persist them in a database or
-file store. The resulting analysis and transcription remain in that tab's
+which sends it to Anthropic for processing. The server validates MIME type and
+size, then decodes the upload as strict UTF-8 and rejects control characters,
+so a binary file relabelled `text/plain` never reaches a paid model call.
+Anchor Lines processes the file bytes in memory and does not persist them in a
+database or file store. The resulting analysis and transcription remain in that tab's
 `sessionStorage` until the tab closes; uploaded-file previews are transient and
 are unavailable after a reload. Synthetic samples stay local to the app and are
 key-free.
@@ -68,14 +80,17 @@ EXTRACTION_MODEL=claude-sonnet-4-6
 
 - Next.js App Router provides the responsive interface and `/api/extract`
   server route.
-- The server uses a two-pass Anthropic workflow: first transcribe the image or
-  PDF, then extract a schema-validated award-letter analysis from that exact
-  transcription. Pass-one text is delimited as untrusted data. Deterministic
-  pack logic verifies each exact source line, monetary occurrence, raw label,
-  aid category, normalized name, explanation, and explicit period before a
-  result can be returned. A failed validation gets one corrective retry.
-- `lib/anchor.ts` normalizes text, finds exact quotes where possible, and falls
-  back to a bounded fuzzy match. Each card highlights its source span; an
+- The server uses a single Anthropic call. The upload is already plain text, so
+  its bytes are the transcription and there is nothing to transcribe: the model
+  is only asked to extract a schema-validated analysis from text it cannot
+  restate. The letter text is delimited as untrusted data. Deterministic pack
+  logic verifies each exact source line, monetary occurrence, raw label, aid
+  category, normalized name, explanation, and explicit period before a result
+  can be returned. A failed validation gets one corrective retry.
+- `lib/anchor.ts` normalizes case and whitespace, then requires an exact match.
+  There is no fuzzy fallback: because the transcription is the uploaded file
+  rather than a reading of an image, a quote that is not present verbatim is a
+  fabricated quote, not a misread one. Each card highlights its source span; an
   unmatched claim is labeled **not stated in letter**.
 - `packs/financial-aid.ts` separates gift aid, loans, work-study, and other
   items. It derives the COA period without changing the extraction schema and
@@ -95,8 +110,11 @@ build settings, and set `ANTHROPIC_API_KEY` as a server-only production
 environment variable. Optionally set `EXTRACTION_MODEL`; otherwise the default
 is `claude-sonnet-4-6`.
 
-The 4 MiB file maximum is an intentional deployability limit: it leaves room
-for multipart overhead beneath Vercel Functions' 4.5 MB request-body limit.
+The 32 KiB file maximum is an output-token budget rather than a transport
+limit. The model echoes the transcription back inside its JSON response, so the
+ceiling is set by what fits in one extraction call alongside the extracted line
+items; it stays comfortably beneath Vercel Functions' 4.5 MB request-body limit
+either way. A 32 KiB letter is far longer than any real award letter.
 The upload route also requires a matching browser `Origin`, permits five paid
 extractions per IP per minute, and caps paid extraction at two concurrent calls
 per process. On Vercel, the rate-limit key uses one validated

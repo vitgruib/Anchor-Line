@@ -1,7 +1,6 @@
 export interface AnchorMatch {
   start: number;
   end: number;
-  score: number;
 }
 
 interface NormalizedText {
@@ -35,99 +34,26 @@ function normalizeWithIndexMap(value: string): NormalizedText {
   return { text: characters.join(""), indexMap };
 }
 
-function levenshteinDistance(left: string, right: string): number {
-  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
-
-  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
-    const current = [leftIndex];
-    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
-      current[rightIndex] = Math.min(
-        current[rightIndex - 1] + 1,
-        previous[rightIndex] + 1,
-        previous[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
-      );
-    }
-    previous.splice(0, previous.length, ...current);
-  }
-
-  return previous[right.length];
-}
-
-function matchForRange(
-  source: NormalizedText,
-  start: number,
-  end: number,
-  score: number,
-): AnchorMatch {
-  return {
-    start: source.indexMap[start],
-    end: source.indexMap[end - 1] + 1,
-    score,
-  };
-}
-
 /**
  * Locates a quoted claim in a transcription, returning offsets into the original
- * (not normalized) transcription. Exact normalized matches are preferred.
+ * (not normalized) transcription, or null when the quote is not present.
+ *
+ * The match is exact. Uploads are plain text, so the transcription is the file
+ * the student handed us rather than a reading of an image, and a quote that
+ * does not appear in it verbatim is a fabricated quote — not a near miss to be
+ * rescued by approximate matching. Normalization folds case and collapses
+ * whitespace runs so that formatting alone cannot break an otherwise real
+ * quote; it never lets differing characters match.
  */
-export function anchorQuote(
-  transcription: string,
-  quote: string,
-  threshold = 0.85,
-): AnchorMatch | null {
+export function anchorQuote(transcription: string, quote: string): AnchorMatch | null {
   const source = normalizeWithIndexMap(transcription);
   const normalizedQuote = normalizeWithIndexMap(quote).text;
 
-  if (!source.text || !normalizedQuote) {
-    return null;
-  }
+  if (!source.text || !normalizedQuote) return null;
 
-  const exactStart = source.text.indexOf(normalizedQuote);
-  if (exactStart >= 0) {
-    return matchForRange(
-      source,
-      exactStart,
-      exactStart + normalizedQuote.length,
-      1,
-    );
-  }
+  const start = source.text.indexOf(normalizedQuote);
+  if (start < 0) return null;
 
-  const minLength = Math.max(
-    1,
-    Math.floor(normalizedQuote.length * 0.8),
-  );
-  const maxLength = Math.min(
-    source.text.length,
-    Math.ceil(normalizedQuote.length * 1.2),
-  );
-  let bestMatch: AnchorMatch | null = null;
-  let bestLengthDifference = Number.POSITIVE_INFINITY;
-
-  for (let start = 0; start < source.text.length; start += 1) {
-    for (let length = minLength; length <= maxLength; length += 1) {
-      const end = start + length;
-      if (end > source.text.length) {
-        break;
-      }
-
-      const candidate = source.text.slice(start, end);
-      const distance = levenshteinDistance(candidate, normalizedQuote);
-      const score = 1 - distance / Math.max(candidate.length, normalizedQuote.length);
-      const lengthDifference = Math.abs(length - normalizedQuote.length);
-      if (
-        score < threshold ||
-        (bestMatch &&
-          (score < bestMatch.score ||
-            (score === bestMatch.score &&
-              lengthDifference >= bestLengthDifference)))
-      ) {
-        continue;
-      }
-
-      bestMatch = matchForRange(source, start, end, score);
-      bestLengthDifference = lengthDifference;
-    }
-  }
-
-  return bestMatch;
+  const end = start + normalizedQuote.length;
+  return { start: source.indexMap[start], end: source.indexMap[end - 1] + 1 };
 }

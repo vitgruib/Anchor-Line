@@ -139,12 +139,6 @@ export function LetterWorkspace({ offer }: LetterWorkspaceProps) {
               activeMatch={activeKey ? (anchorByKey.get(activeKey) ?? null) : null}
               registerSourceRef={registerSourceRef}
             />
-          ) : source.mediaType === "application/pdf" ? (
-            <iframe
-              className="source-pdf"
-              src={source.mediaUrl}
-              title={`Original ${source.label}`}
-            />
           ) : source.mediaUrl ? (
             <div className="source-image">
               <Image
@@ -222,7 +216,7 @@ export function LetterWorkspace({ offer }: LetterWorkspaceProps) {
                 </span>
                 <span className="claim-card__source">
                   {anchorByKey.get("cost") ? (
-                    <span>Source match · {Math.round((anchorByKey.get("cost")?.score ?? 0) * 100)}%</span>
+                    <span>Found in letter</span>
                   ) : (
                     <span className="honesty-badge">not stated in letter</span>
                   )}

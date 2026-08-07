@@ -126,3 +126,20 @@ Unsub marked the exact source text; Original rendered the letter image; Juniper
 loaded; Compare showed the red cost hidden state; and the 390×844 mobile check
 had no document overflow. Live Anthropic and Vercel deployment remain untested
 without credentials/deployment authority; video and submission remain human-owned.
+
+2026-08-07 - Removed OCR entirely and narrowed input to formats whose text is
+recoverable exactly. Uploads are now plain text only: images and PDFs are
+rejected at both the client and the route, because OCR is approximate and PDF
+text extraction reconstructs word spacing from glyph kerning and reading order
+from page geometry, which is least reliable on the dollar-bearing tables this
+tool reads. The transcription pass is gone — a `.txt` upload already is the
+transcription — so extraction is a single Anthropic call. `lib/anchor.ts` lost
+its sliding-window Levenshtein fallback and now requires an exact match after
+case/whitespace normalization; a quote absent from the letter is treated as a
+fabrication rather than a misreading, and the per-claim "Source match · N%"
+badge was replaced with "Found in letter" since the score was always 1 by
+construction. Signature-byte validation was replaced with strict UTF-8 decoding
+plus a control-character sweep, which is the equivalent guarantee for text. The
+upload cap moved from 4 MiB to 32 KiB: it is now an output-token budget, since
+the model echoes the transcription back inside its JSON response. Suite is
+210 tests green (was 201).

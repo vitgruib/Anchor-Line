@@ -8,7 +8,11 @@ export interface AnalysisSource {
   kind: "sample" | "upload";
   label: string;
   mediaUrl?: string;
-  mediaType?: "image/png" | "image/jpeg" | "application/pdf";
+  /**
+   * Only the bundled sample letters carry a rendered original. Uploads are
+   * plain text, so their transcription pane already shows the source exactly.
+   */
+  mediaType?: "image/png";
 }
 
 export interface StoredAnalysis {
@@ -25,7 +29,7 @@ const StoredAnalysisSchema: z.ZodType<StoredAnalysis> = z.object({
     kind: z.enum(["sample", "upload"]),
     label: z.string().min(1),
     mediaUrl: z.string().optional(),
-    mediaType: z.enum(["image/png", "image/jpeg", "application/pdf"]).optional(),
+    mediaType: z.literal("image/png").optional(),
   }),
   analysis: LetterAnalysisSchema,
 });

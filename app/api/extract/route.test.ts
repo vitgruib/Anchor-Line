@@ -28,20 +28,19 @@ const validAnalysis = {
   missing_info: [],
 };
 
-const signatures = {
-  "image/png": [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
-  "image/jpeg": [0xff, 0xd8, 0xff],
-  "application/pdf": [...new TextEncoder().encode("%PDF-")],
-} as const;
+const letterText = "Example University\nFederal Pell Grant $3,200";
 
 function validFile(
-  name = "letter.png",
-  type: keyof typeof signatures = "image/png",
-  size = signatures[type].length,
+  name = "letter.txt",
+  type = "text/plain",
+  body: string | Uint8Array<ArrayBuffer> = letterText,
 ): File {
-  const bytes = new Uint8Array(size);
-  bytes.set(signatures[type].slice(0, size));
-  return new File([bytes], name, { type });
+  return new File([body], name, { type });
+}
+
+/** A file whose declared type is text but whose bytes are not decodable text. */
+function binaryFile(bytes: number[], name = "letter.txt"): File {
+  return new File([new Uint8Array(bytes)], name, { type: "text/plain" });
 }
 
 function upload(
@@ -105,23 +104,36 @@ describe("POST /api/extract", () => {
     await expect(response.json()).resolves.toEqual({ error: "Missing file upload" });
   });
 
-  test("rejects unsupported MIME types", async () => {
-    const response = await POST(upload(new File(["text"], "letter.txt", { type: "text/plain" })));
+  test.each([
+    ["letter.png", "image/png"],
+    ["letter.jpg", "image/jpeg"],
+    ["letter.pdf", "application/pdf"],
+  ])("rejects %s because its text cannot be recovered exactly", async (name, type) => {
+    const response = await POST(upload(new File(["bytes"], name, { type })));
     expect(response.status).toBe(415);
     await expect(response.json()).resolves.toEqual({ error: "Unsupported file type" });
   });
 
-  test("accepts exactly 4 MiB and rejects one byte over the shared limit", async () => {
+  test("accepts a charset-qualified text/plain upload", async () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
     extractLetter.mockResolvedValue(validAnalysis);
-    const boundary = validFile("boundary.png", "image/png", 4 * 1024 * 1024);
+    const file = new File([letterText], "letter.txt", { type: "text/plain; charset=utf-8" });
+
+    const response = await POST(upload(file, { ip: "198.51.100.7" }));
+    expect(response.status).toBe(200);
+  });
+
+  test("accepts exactly 32 KiB and rejects one byte over the shared limit", async () => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    extractLetter.mockResolvedValue(validAnalysis);
+    const boundary = validFile("boundary.txt", "text/plain", "a".repeat(32 * 1024));
     const accepted = await POST(upload(boundary, { ip: "198.51.100.2" }));
     expect(accepted.status).toBe(200);
 
-    const tooLarge = new File([new Uint8Array(4 * 1024 * 1024 + 1)], "letter.png", { type: "image/png" });
+    const tooLarge = validFile("letter.txt", "text/plain", "a".repeat(32 * 1024 + 1));
     const response = await POST(upload(tooLarge));
     expect(response.status).toBe(413);
-    await expect(response.json()).resolves.toEqual({ error: "File exceeds 4 MiB limit" });
+    await expect(response.json()).resolves.toEqual({ error: "File exceeds 32 KiB limit" });
   });
 
   test("rejects cross-origin and missing-origin browser uploads before paid work", async () => {
@@ -225,22 +237,52 @@ describe("POST /api/extract", () => {
     await expect(response.json()).resolves.toEqual(validAnalysis);
   });
 
-  test.each([
-    ["letter.png", "image/png"],
-    ["letter.jpg", "image/jpeg"],
-    ["letter.pdf", "application/pdf"],
-  ] as const)("rejects bytes that do not match declared %s type", async (name, type) => {
+  test("passes the decoded text to extraction rather than the raw bytes", async () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
-    const mismatch = new File([new TextEncoder().encode("not-a-real-file")], name, {
-      type,
-    });
+    extractLetter.mockResolvedValueOnce(validAnalysis);
 
-    const response = await POST(upload(mismatch));
+    await POST(upload(validFile(), { ip: "198.51.100.8" }));
+
+    expect(extractLetter).toHaveBeenCalledWith({ text: letterText });
+  });
+
+  test("strips a UTF-8 byte order mark before extraction", async () => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    extractLetter.mockResolvedValueOnce(validAnalysis);
+    const withBom = new Uint8Array([
+      0xef,
+      0xbb,
+      0xbf,
+      ...new TextEncoder().encode(letterText),
+    ]);
+
+    await POST(upload(validFile("letter.txt", "text/plain", withBom), { ip: "198.51.100.9" }));
+
+    expect(extractLetter).toHaveBeenCalledWith({ text: letterText });
+  });
+
+  test.each([
+    ["invalid UTF-8 sequences", [0xc3, 0x28, 0xa0, 0xa1]],
+    ["binary control bytes", [0x48, 0x69, 0x00, 0x01, 0x02]],
+  ])("rejects a text upload containing %s", async (_label, bytes) => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+
+    const response = await POST(upload(binaryFile(bytes)));
 
     expect(response.status).toBe(415);
     await expect(response.json()).resolves.toEqual({
-      error: "File contents do not match the declared file type",
+      error: "File contents are not decodable as plain text",
     });
+    expect(extractLetter).not.toHaveBeenCalled();
+  });
+
+  test("rejects a text upload with no letter content", async () => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+
+    const response = await POST(upload(validFile("empty.txt", "text/plain", "   \n\t ")));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "File contains no letter text" });
     expect(extractLetter).not.toHaveBeenCalled();
   });
 });

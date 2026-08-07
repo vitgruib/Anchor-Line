@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 import { LetterAnalysisSchema, type LetterAnalysis } from "./schema";
-import { extractionPrompt, TRANSCRIPTION_PROMPT } from "./prompts";
+import { extractionPrompt } from "./prompts";
 import {
   hasAnyToken,
   hasDueBalanceOrRepayment,
@@ -15,8 +15,8 @@ import {
 } from "../packs/financial-aid";
 
 export interface LetterInput {
-  mimeType: "image/png" | "image/jpeg" | "application/pdf";
-  bytes: Uint8Array;
+  /** The uploaded letter, already decoded from plain text by the route. */
+  text: string;
 }
 
 interface MessageRequest {
@@ -61,25 +61,10 @@ function defaultClient(): AnthropicMessagesClient {
   return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }).messages as unknown as AnthropicMessagesClient;
 }
 
-function attachment(input: LetterInput): Record<string, unknown> {
-  const data = Buffer.from(input.bytes).toString("base64");
-  if (input.mimeType === "application/pdf") {
-    return {
-      type: "document",
-      source: { type: "base64", media_type: input.mimeType, data },
-    };
-  }
-
-  return {
-    type: "image",
-    source: { type: "base64", media_type: input.mimeType, data },
-  };
-}
-
-function textFrom(response: MessageResponse, stage: "transcription" | "extraction"): string {
+function textFrom(response: MessageResponse): string {
   if (response.stop_reason !== "end_turn") {
     throw new ExtractionValidationError(
-      `${stage} response did not complete normally (stop_reason: ${response.stop_reason ?? "missing"})`,
+      `extraction response did not complete normally (stop_reason: ${response.stop_reason ?? "missing"})`,
     );
   }
 
@@ -432,23 +417,25 @@ function normalizeSemantics(
   };
 }
 
+/**
+ * Extracts a structured analysis from an award letter.
+ *
+ * There is no transcription pass. The upload is plain text, so its bytes are
+ * already the transcription — reading it with the model would be re-deriving
+ * something we were handed exactly, and every claim is anchored back to this
+ * string rather than to a model's reading of a page.
+ */
 export async function extractLetter(
   input: LetterInput,
   client: AnthropicMessagesClient = defaultClient(),
 ): Promise<LetterAnalysis> {
-  const transcriptionResponse = await client.create({
-    model: model(),
-    max_tokens: 8_000,
-    system: TRANSCRIPTION_PROMPT,
-    messages: [{ role: "user", content: [attachment(input)] }],
-  });
-  const transcription = textFrom(transcriptionResponse, "transcription");
+  const transcription = input.text;
   let feedback: string | undefined;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const extractionResponse = await client.create({
       model: model(),
-      max_tokens: 8_000,
+      max_tokens: 16_000,
       temperature: 0,
       system: extractionPrompt(transcription, feedback),
       messages: [
@@ -460,9 +447,7 @@ export async function extractLetter(
     });
 
     try {
-      const parsed = LetterAnalysisSchema.parse(
-        parseJson(textFrom(extractionResponse, "extraction")),
-      );
+      const parsed = LetterAnalysisSchema.parse(parseJson(textFrom(extractionResponse)));
       const proven = assertProvenance(parsed, transcription);
       const award = assertAwardLetter(proven, transcription);
       return normalizeSemantics(award, transcription);

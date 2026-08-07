@@ -8,7 +8,7 @@ import { LetterAnalysisSchema, type LetterAnalysis } from "../lib/schema";
 import {
   isAcceptedUploadType,
   MAX_UPLOAD_BYTES,
-  MAX_UPLOAD_MIB,
+  MAX_UPLOAD_KIB,
 } from "../lib/upload-contract";
 
 export const NON_LETTER_MESSAGE = "This doesn't look like an award letter";
@@ -35,9 +35,11 @@ const samples = [
 ] as const;
 
 export function validateUpload(file: File): string | null {
-  if (!isAcceptedUploadType(file.type)) return "Choose a PNG, JPG, or PDF award letter.";
+  if (!isAcceptedUploadType(file.type)) {
+    return "Choose a plain-text (.txt) award letter.";
+  }
   if (file.size > MAX_UPLOAD_BYTES) {
-    return `Choose a file that is ${MAX_UPLOAD_MIB} MB or smaller.`;
+    return `Choose a file that is ${MAX_UPLOAD_KIB} KB or smaller.`;
   }
   return null;
 }
@@ -111,12 +113,9 @@ export function UploadPanel() {
     try {
       const analysis = await requestAnalysis({ body: form });
       const id = `upload-${Date.now()}-${crypto.randomUUID()}`;
-      finishAnalysis(id, analysis, {
-        kind: "upload",
-        label: file.name,
-        mediaUrl: URL.createObjectURL(file),
-        mediaType: file.type as AnalysisSource["mediaType"],
-      });
+      // A text upload has no separate original to show: the transcription pane
+      // already renders the exact bytes that were uploaded.
+      finishAnalysis(id, analysis, { kind: "upload", label: file.name });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "We couldn't read that letter.");
       setBusyLabel(null);
@@ -161,13 +160,13 @@ export function UploadPanel() {
               <input
                 className="visually-hidden"
                 type="file"
-                accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf"
+                accept=".txt,text/plain"
                 onChange={onFileChange}
                 disabled={Boolean(busyLabel)}
               />
               {busyLabel ? "Reading letter…" : "Choose a letter"}
             </label>
-            <span className="upload-meta">PNG, JPG, or PDF · {MAX_UPLOAD_MIB} MB max</span>
+            <span className="upload-meta">Plain text (.txt) · {MAX_UPLOAD_KIB} KB max</span>
           </div>
         </div>
         <div className="upload-panel__mark" aria-hidden="true">
@@ -179,7 +178,7 @@ export function UploadPanel() {
       {busyLabel ? (
         <div className="status-message" role="status">
           <span className="status-spinner" aria-hidden="true" />
-          Reading {busyLabel}. First we transcribe it, then we check every claim.
+          Reading {busyLabel}. Every claim is checked against the text you gave us.
         </div>
       ) : null}
       {error ? (

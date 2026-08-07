@@ -32,24 +32,33 @@ result.
 
 ## How it works
 
-The app uses a two-pass extraction architecture. Pass one transcribes the
-image or PDF. Pass two asks the model to produce a strict, schema-validated
-analysis from that exact transcription, including verbatim source quotes. A
-failed validation receives one corrective retry. The transcription is
+The app uses a single-pass extraction architecture over plain text. Because the
+upload is a `.txt` file, its bytes already are the transcription, so there is no
+transcription pass to run: the model is asked only to produce a strict,
+schema-validated analysis with verbatim source quotes from text it never gets to
+restate. A failed validation receives one corrective retry. The letter text is
 explicitly delimited as untrusted data. Deterministic pack rules require exact
 one-line quotes and complete dollar-occurrence coverage, bind raw labels to
 their own quotes, reject category disagreement, replace recognized names and
 explanations, and derive only source-stated periods. The client then runs its own
-anchored matching: lowercase/collapse whitespace/punctuation normalization,
-exact substring matching, and a bounded fuzzy fallback for OCR noise.
+anchored matching: lowercase/collapse whitespace/punctuation normalization and
+exact substring matching, with no fuzzy fallback.
 
-The tech stack is Next.js App Router, React, TypeScript, Zod, Vitest,
-Anthropic's vision API, and deterministic synthetic fixtures. Client-side
+That last point is the design's load-bearing decision. An earlier version
+accepted images and PDFs, transcribed them with the model, and tolerated OCR
+noise with a bounded Levenshtein fallback — which meant a claim could be
+"anchored" to a line that did not quite say what the anchor implied. Restricting
+input to formats whose text is recoverable exactly removes the noise instead of
+compensating for it, so an unmatched quote is now a fabrication to reject rather
+than a misreading to rescue.
+
+The tech stack is Next.js App Router, React, TypeScript, Zod, Vitest, the
+Anthropic Messages API, and deterministic synthetic fixtures. Client-side
 comparison math and financial-aid guardrails remain deterministic instead of
 being delegated to the model.
 
-Live uploads are limited to PNG, JPG, or PDF files up to **4 MB** so multipart
-requests remain deployable under the Vercel Functions body limit. Same-origin,
+Live uploads are limited to plain-text files up to **32 KB**, a ceiling set by
+what fits in one extraction call rather than by transport. Same-origin,
 per-IP rate, and in-process concurrency controls run before paid provider calls;
 synthetic samples remain key-free and unmetered.
 

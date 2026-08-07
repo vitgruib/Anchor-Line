@@ -66,7 +66,7 @@ export function ClaimCard({ item, anchor, active, onActivate }: ClaimCardProps) 
         ) : null}
         <span className="claim-card__source">
           {anchor ? (
-            <span>Source match · {Math.round(anchor.score * 100)}%</span>
+            <span>Found in letter</span>
           ) : (
             <span className="honesty-badge">not stated in letter</span>
           )}

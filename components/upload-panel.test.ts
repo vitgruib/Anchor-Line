@@ -19,36 +19,43 @@ afterEach(() => {
 });
 
 describe("upload panel helpers", () => {
-  test("accepts PNG, JPG, and PDF files through the exact 4 MiB boundary", () => {
-    expect(validateUpload(new File(["png"], "letter.png", { type: "image/png" }))).toBeNull();
-    expect(validateUpload(new File(["jpg"], "letter.jpg", { type: "image/jpeg" }))).toBeNull();
-    expect(validateUpload(new File(["pdf"], "letter.pdf", { type: "application/pdf" }))).toBeNull();
+  test("accepts plain text through the exact 32 KiB boundary", () => {
+    expect(validateUpload(new File(["letter"], "letter.txt", { type: "text/plain" }))).toBeNull();
     expect(
       validateUpload(
-        new File([new Uint8Array(4 * 1024 * 1024)], "boundary.pdf", {
-          type: "application/pdf",
-        }),
+        new File(["letter"], "letter.txt", { type: "text/plain; charset=utf-8" }),
+      ),
+    ).toBeNull();
+    expect(
+      validateUpload(
+        new File(["a".repeat(32 * 1024)], "boundary.txt", { type: "text/plain" }),
       ),
     ).toBeNull();
   });
 
-  test("rejects unsupported and oversized files with clear copy", () => {
-    expect(validateUpload(new File(["text"], "letter.txt", { type: "text/plain" }))).toBe(
-      "Choose a PNG, JPG, or PDF award letter.",
+  test.each([
+    ["letter.png", "image/png"],
+    ["letter.jpg", "image/jpeg"],
+    ["letter.pdf", "application/pdf"],
+  ])("rejects %s, whose text cannot be recovered exactly", (name, type) => {
+    expect(validateUpload(new File(["bytes"], name, { type }))).toBe(
+      "Choose a plain-text (.txt) award letter.",
     );
-    expect(
-      validateUpload(
-        new File([new Uint8Array(4 * 1024 * 1024 + 1)], "letter.png", {
-          type: "image/png",
-        }),
-      ),
-    ).toBe("Choose a file that is 4 MB or smaller.");
   });
 
-  test("shows the shared 4 MB contract in upload copy", () => {
+  test("rejects oversized files with clear copy", () => {
+    expect(
+      validateUpload(
+        new File(["a".repeat(32 * 1024 + 1)], "letter.txt", { type: "text/plain" }),
+      ),
+    ).toBe("Choose a file that is 32 KB or smaller.");
+  });
+
+  test("shows the shared plain-text contract in upload copy", () => {
     const { container } = render(createElement(UploadPanel));
-    expect(container.textContent).toContain("4 MB max");
-    expect(container.textContent).not.toContain("10 MB max");
+    expect(container.textContent).toContain("32 KB max");
+    expect(container.textContent).toContain("Plain text (.txt)");
+    expect(container.textContent).not.toContain("PNG");
   });
 
   test("discloses provider processing, byte retention, tab storage, and local samples", () => {
@@ -75,14 +82,14 @@ describe("upload panel helpers", () => {
 
     fireEvent.drop(dropTarget!, {
       dataTransfer: {
-        files: [new File(["first"], "first.png", { type: "image/png" })],
+        files: [new File(["first"], "first.txt", { type: "text/plain" })],
       },
     });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 
     fireEvent.drop(dropTarget!, {
       dataTransfer: {
-        files: [new File(["second"], "second.png", { type: "image/png" })],
+        files: [new File(["second"], "second.txt", { type: "text/plain" })],
       },
     });
 

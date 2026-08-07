@@ -1,10 +1,10 @@
 import { ExtractionValidationError, NotAwardLetterError, extractLetter } from "../../../lib/llm";
 import { clientIpKey, extractionGate } from "../../../lib/abuse-controls";
 import {
-  hasValidUploadSignature,
+  decodeUploadText,
   isAcceptedUploadType,
   MAX_UPLOAD_BYTES,
-  MAX_UPLOAD_MIB,
+  MAX_UPLOAD_KIB,
 } from "../../../lib/upload-contract";
 
 import offer1 from "../../../eval/letters/cedar-ridge.json";
@@ -43,12 +43,14 @@ export async function POST(request: Request): Promise<Response> {
   if (!(file instanceof File)) return error("Missing file upload", 400);
   if (!isAcceptedUploadType(file.type)) return error("Unsupported file type", 415);
   if (file.size > MAX_UPLOAD_BYTES) {
-    return error(`File exceeds ${MAX_UPLOAD_MIB} MiB limit`, 413);
+    return error(`File exceeds ${MAX_UPLOAD_KIB} KiB limit`, 413);
   }
   const bytes = new Uint8Array(await file.arrayBuffer());
-  if (!hasValidUploadSignature(file.type, bytes)) {
-    return error("File contents do not match the declared file type", 415);
+  const text = decodeUploadText(bytes);
+  if (text === null) {
+    return error("File contents are not decodable as plain text", 415);
   }
+  if (text.trim().length === 0) return error("File contains no letter text", 400);
   if (!process.env.ANTHROPIC_API_KEY) {
     return error("Extraction service is not configured", 503);
   }
@@ -61,10 +63,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    const analysis = await extractLetter({
-      mimeType: file.type,
-      bytes,
-    });
+    const analysis = await extractLetter({ text });
     return Response.json(analysis);
   } catch (caught) {
     if (caught instanceof ExtractionValidationError) {
